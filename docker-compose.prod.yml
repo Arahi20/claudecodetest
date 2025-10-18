@@ -1,0 +1,89 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: flood_db_prod
+    environment:
+      POSTGRES_USER: ${DB_USER:-floodapp}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-CHANGE_THIS_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:-flood_reporting}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-floodapp}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - flood_network
+
+  # Flask Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: flood_backend_prod
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-floodapp}:${DB_PASSWORD:-CHANGE_THIS_PASSWORD}@db:5432/${DB_NAME:-flood_reporting}
+      SECRET_KEY: ${SECRET_KEY:-CHANGE_THIS_SECRET_KEY}
+      FLASK_ENV: production
+      UPLOAD_FOLDER: /app/uploads
+      MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE:-5242880}
+    volumes:
+      - backend_uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      sh -c "
+        flask db upgrade &&
+        gunicorn --bind 0.0.0.0:5001 --workers 4 --timeout 120 --access-logfile - --error-logfile - run:app
+      "
+    restart: unless-stopped
+    networks:
+      - flood_network
+
+  # React Frontend (Production build with nginx)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: production
+      args:
+        REACT_APP_API_URL: ${REACT_APP_API_URL:-http://localhost:5001/api}
+    container_name: flood_frontend_prod
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - flood_network
+
+  # Nginx Reverse Proxy (optional - uncomment for single domain setup)
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: flood_nginx
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+  #     - ./nginx/ssl:/etc/nginx/ssl:ro
+  #   depends_on:
+  #     - frontend
+  #     - backend
+  #   restart: unless-stopped
+  #   networks:
+  #     - flood_network
+
+volumes:
+  postgres_data:
+  backend_uploads:
+
+networks:
+  flood_network:
+    driver: bridge

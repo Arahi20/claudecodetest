@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: flood_db
+    environment:
+      POSTGRES_USER: floodapp
+      POSTGRES_PASSWORD: floodpass
+      POSTGRES_DB: flood_reporting
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U floodapp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Flask Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: flood_backend
+    environment:
+      DATABASE_URL: postgresql://floodapp:floodpass@db:5432/flood_reporting
+      SECRET_KEY: dev-docker-secret-key-change-in-production
+      FLASK_ENV: development
+      UPLOAD_FOLDER: /app/uploads
+      MAX_UPLOAD_SIZE: 5242880
+    ports:
+      - "5001:5001"
+    volumes:
+      - ./backend:/app
+      - backend_uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      sh -c "
+        flask db upgrade &&
+        gunicorn --bind 0.0.0.0:5001 --workers 2 --reload --timeout 120 run:app
+      "
+
+  # React Frontend with Hot Reload
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    container_name: flood_frontend
+    environment:
+      - REACT_APP_API_URL=http://localhost:5001/api
+      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    stdin_open: true
+    tty: true
+
+volumes:
+  postgres_data:
+  backend_uploads:
