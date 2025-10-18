@@ -37,4 +37,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
     CMD python -c "import requests; requests.get('http://localhost:5001/api/stats')" || exit 1
 
 # Run the application
-CMD ["gunicorn", "--bind", "0.0.0.0:5001", "--workers", "4", "--timeout", "120", "run:app"]
+CMD ["sh", "-c", "flask db upgrade && gunicorn --bind 0.0.0.0:5001 --workers 4 --timeout 120 run:app"]
